@@ -14,7 +14,7 @@
 
 ---
 
-This is the private SII-MATH derivative of
+This is the public personal fork of
 [AxelDlv00/hgraph](https://github.com/AxelDlv00/hgraph), based on upstream commit
 `88e9c2877102b4984029874a8a51e37f9474dfa6`. It retains upstream history and the
 Apache-2.0 license. The optional native chapter map and custom-page lifecycle
