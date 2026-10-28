@@ -238,6 +238,8 @@ export interface BibEntry {
   url: string | null;
 }
 
+export type GraphProgressMetric = 'local' | 'closure';
+
 export interface ProjectData {
   title: string;
   mode?: 'doc' | 'list';
@@ -261,6 +263,8 @@ export interface ProjectData {
   customTabs?: ContentTab[];
   /** Opt-in built-in chapter map; omitted on existing/default exports. */
   map?: { enabled: boolean; label: string };
+  /** Chapter aggregates only; individual proof states keep dependency closure. */
+  graphProgress?: GraphProgressMetric;
   gvsvg?: Record<string, string>;
   /** Versioned incremental payload locations. Absent on older monolithic
    *  exports, which the frontend still accepts through data.json. */

@@ -126,6 +126,7 @@ one card (paths are relative to the project root)::
       accent: '#B4530B'          # accent/theme (this project's colours — landing
                                  # card + blueprint view), and:
       map: true                 # optional built-in blueprint map; default false
+      graph_progress: local     # chapter percentages: local | closure (default)
                                 # or {enabled: true, label: Blueprint map}
       tabs:                      # extra tabs on *this project's blueprint view*
         - id: people             # (People, Roadmap, …), beside Overview/Summary/
@@ -759,6 +760,11 @@ def _project_site_options(site_cfg: dict, *, base: Path) -> dict:
     result = {"customTabs": _content_tabs(site_cfg.get("tabs"), base=base, where="project")}
     if map_config is not None:
         result["map"] = map_config
+    if "graph_progress" in site_cfg:
+        metric = site_cfg["graph_progress"]
+        if metric not in ("local", "closure"):
+            raise HGraphError("site.graph_progress: expected 'local' or 'closure'")
+        result["graphProgress"] = metric
     return result
 
 

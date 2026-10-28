@@ -143,6 +143,9 @@ class _Model:
         F = [entries[i].get("lean_status") in _DONE for i in range(self.n)]
         self.F = F
         self.closed = self._closures(deps_adj, F)
+        # The aggregate metric never changes individual proof/closure states.
+        self.progress_metric = data.get("graphProgress", "closure")
+        self.progress_done = F if self.progress_metric == "local" else self.closed
 
         self.stmt: list[str] = []
         self.proof: list[str] = []
@@ -273,7 +276,7 @@ def _dot_overview(m: _Model, unit_of, n_units: int, label_fn, id_prefix: str) ->
     for i in range(m.n):
         u = unit_of[i]
         count[u] += 1
-        if m.closed[i]:
+        if m.progress_done[i]:
             done[u] += 1
     em: dict[tuple[int, int], int] = {}
     for s, t, _ in m.edges:
@@ -324,9 +327,10 @@ def _dot_overview(m: _Model, unit_of, n_units: int, label_fn, id_prefix: str) ->
         is_ch = id_prefix == "ch"
         fill, border = ((_CLUSTER["fill"], _CLUSTER["border"]) if is_ch
                         else (_gv_green(pct), "#5e8777"))
-        out.append('  "%s%d" [label="%s\\n%d statements · %d%%",fillcolor="%s",'
+        suffix = " local" if m.progress_metric == "local" else ""
+        out.append('  "%s%d" [label="%s\\n%d statements · %d%%%s",fillcolor="%s",'
                    'color="%s",penwidth=2.6,fontcolor="%s",tooltip="%s — click to expand"];'
-                   % (id_prefix, u, lbl, count[u], pct, fill, border,
+                   % (id_prefix, u, lbl, count[u], pct, suffix, fill, border,
                       _CLUSTER["text"] if is_ch else _NODE_TEXT, lbl))
     for (b, a), w in reduced.items():
         extra = (' [penwidth=%.1f]' % min(4.0, 1 + math.sqrt(w))) if w > 1 else ''

@@ -46,6 +46,28 @@ web interface for exploring and reviewing one project or an entire workspace.
 - **Multi-project workspaces.** Combine several formalization projects under
   one landing page and deployment.
 
+## Graph chapter progress
+
+A project's `hgraph/config.yaml` can select the numerator used for chapter
+percentages in the dependency graph:
+
+```yaml
+site:
+  graph_progress: local  # local | closure; default: closure
+```
+
+`local` counts Blueprint entries with native `lean_ok` or `mathlib_ok`
+status. The denominator includes all Blueprint entries, including unbound
+and admitted entries. It describes source-local formalization, not a
+transitive axiom audit or a successful Lean build. Labels explicitly say
+`local`.
+
+`closure` retains the original behavior: an entry counts only when its local
+binding and all stated prerequisites are complete. Choosing a metric changes
+chapter aggregates only; individual proof states, dependency edges, admitted
+inputs and the detailed closure summary are unchanged. Static precomputed
+layouts and browser layouts use the same metric.
+
 ## Quick start
 
 Requires Python 3.9 or newer.

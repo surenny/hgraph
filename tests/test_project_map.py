@@ -89,7 +89,8 @@ class ProjectMapPayloadTests(unittest.TestCase):
 
     def test_full_lazy_and_live_payloads_have_identical_optional_project_options(self):
         for site in ({}, {"map": False}, {"map": {"enabled": False}},
-                     {"map": True}, {"map": {"enabled": True, "label": "Argument map"}}):
+                     {"map": True}, {"map": {"enabled": True, "label": "Argument map"}},
+                     {"graph_progress": "local"}, {"map": True, "graph_progress": "closure"}):
             with self.subTest(site=site), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 graph = self.make_project(root, site)
@@ -107,12 +108,13 @@ class ProjectMapPayloadTests(unittest.TestCase):
                     else:
                         self.assertEqual(payload["map"], expected)
                     self.assertEqual(payload["customTabs"], [])
+                    self.assertEqual(payload.get("graphProgress"), site.get("graph_progress"))
 
     def test_workspace_and_solo_static_exports_keep_map_and_modal_config(self):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
             project = workspace / "project"
-            site = {"map": {"enabled": True, "label": "Argument map"}, "tabs": [
+            site = {"map": {"enabled": True, "label": "Argument map"}, "graph_progress": "local", "tabs": [
                 {"id": "notes", "label": "Notes", "content": "notes.html", "presentation": "modal"},
                 {"id": "hidden", "enabled": False},
             ]}
@@ -132,6 +134,7 @@ class ProjectMapPayloadTests(unittest.TestCase):
                     payload = json.loads((export / filename).read_text(encoding="utf-8"))
                     self.assertEqual(payload["map"], {"enabled": True, "label": "Argument map"})
                     self.assertEqual(payload["customTabs"], expected_tabs)
+                    self.assertEqual(payload["graphProgress"], "local")
 
     def test_invalid_project_options_are_rejected_by_both_payload_paths(self):
         for invalid in ({"map": "true"}, {"tabs": [{"id": "map", "enabled": False}]},
