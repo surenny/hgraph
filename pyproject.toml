@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hgraph"
-version = "0.1.0+sii.5"
+version = "0.1.0+sii.6"
 description = "A plain-files semantic graph for autoformalization"
 readme = "README.md"
 license = {file = "LICENSE"}

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_right
+from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -562,17 +563,27 @@ def parse_lean(text: str) -> list[dict]:
         offsets.append(offsets[-1] + len(line))
     doc_ends = [end for _start, end in scanned.docs]
     ns: list[str] = []
-    scopes: list[tuple[str, str, int]] = []
+    scopes: list[tuple[str, str, int, bool]] = []
+    # Lean 4 `module` files are private by default, unless a public command or
+    # enclosing public section exports the declaration. `expose` is unrelated
+    # to public visibility.
+    default_private = bool(re.search(r"(?m)^\s*module\b", scanned.code))
     context: list[str] = []
     contexts: list[str] = []
     boundaries: list[int] = []
     decls: list[tuple[int, str, str, bool]] = []   # (line index, fqname, kind, private)
     for i, line in enumerate(clean_lines):
         s = code_lines[i].strip()
-        m_scope = re.match(r"(?:(?:public|noncomputable)\s+)?(namespace|section)\b\s*([^\s]*)", s)
+        m_scope = re.match(
+            r"(?:@\[[^\]]*\]\s*)*((?:(?:public|private|noncomputable)\s+)*)"
+            r"(namespace|section)\b\s*([^\s]*)", s)
         if m_scope:
-            kind, name = m_scope.groups()
-            scopes.append((kind, name, len(context)))
+            modifiers, kind, name = m_scope.groups()
+            scopes.append((kind, name, len(context), default_private))
+            if "public" in modifiers.split():
+                default_private = False
+            elif "private" in modifiers.split():
+                default_private = True
             context.append(lines[i])
             if kind == "namespace":
                 ns.append(name)
@@ -580,7 +591,7 @@ def parse_lean(text: str) -> list[dict]:
             continue
         if re.match(r"end\b", s):
             if scopes:
-                kind, _name, context_len = scopes.pop()
+                kind, _name, context_len, default_private = scopes.pop()
                 del context[context_len:]
                 if kind == "namespace":
                     ns.pop()
@@ -608,7 +619,9 @@ def parse_lean(text: str) -> list[dict]:
             kind, name = m.group(1), m.group(2)
             if name.startswith(('[', '{')):
                 continue  # anonymous instances have no source-level name
-            is_private = bool(re.search(r"\bprivate\s+", line[:m.start(1)]))
+            modifiers = re.sub(r"@\[[^\]]*\]", "", code_lines[i][:m.start(1)])
+            is_private = bool(re.search(r"\bprivate\s+", modifiers)) or (
+                default_private and not re.search(r"\bpublic\s+", modifiers))
             # `_root_.Foo` is explicitly outside the surrounding namespace;
             # retaining the marker would create a name that Lean cannot refer
             # to (`MorganTianLib._root_.Foo`).
@@ -747,7 +760,7 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
     node_changes = 0
     edge_changes = 0
 
-    # 1. Lean nodes (keyed by fully-qualified name) ------------------------- #
+    # 1. Lean nodes ------------------------------------------------------- #
     # reading + regex-parsing each file is independent of every other file,
     # so on a large Lean tree it's worth spreading across a process pool;
     # `_upsert` (graph writes) stays sequential below.
@@ -759,39 +772,68 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
     else:
         parsed = [_read_and_parse_lean((f, root_abs)) for f in lean_files]
 
-    lean_id: dict[str, str] = {}
-    lean_status: dict[str, str] = {}          # fqname → lean_ok | sorry
-    lean_seen_at: dict[str, str] = {}
-    lean_private: dict[str, bool] = {}
+    declarations: dict[str, list[tuple[str, dict]]] = defaultdict(list)
     for rel, decls in parsed:
         for d in decls:
-            if d["fqname"] in lean_seen_at:
+            declarations[d["fqname"]].append((rel, d))
+
+    # Preserve IDs for unambiguous names. Colliding source names (including
+    # valid private helpers in different modules) need independent nodes.
+    # Every declaration also accepts a file-qualified binding, even when its
+    # short source name happens to be unique in this scan.
+    lean_id: dict[str, str] = {}
+    lean_status: dict[str, str] = {}
+    records: list[tuple[str, dict, str, str]] = []
+    for name, occurrences in declarations.items():
+        public_file = None
+        for rel, d in occurrences:
+            source_key = f"{rel}::{name}"
+            if source_key in lean_id:
+                raise HGraphError(f"duplicate Lean declaration in one source file: {source_key}")
+            nid = node_id("lean", source_key if len(occurrences) > 1 else name)
+            lean_id[source_key] = nid
+            lean_status[source_key] = "sorry" if d["sorry"] else "lean_ok"
+            if len(occurrences) == 1:
+                lean_id[name] = nid
+                lean_status[name] = lean_status[source_key]
+            records.append((rel, d, source_key, nid))
+            if not d.get("private") and public_file is not None:
                 warnings.append(
-                    f"{d['fqname']}: Lean declaration appears more than once "
-                    f"({lean_seen_at[d['fqname']]}, {rel})")
-            else:
-                lean_seen_at[d["fqname"]] = rel
-            nid = node_id("lean", d["fqname"])
-            lean_id[d["fqname"]] = nid
-            lean_status[d["fqname"]] = "sorry" if d["sorry"] else "lean_ok"
-            lean_private[d["fqname"]] = bool(d.get("private"))
-            node_changes += _upsert(
-                g, nid, title=d["fqname"], type="lean", content=d["body"],
-                owned={"content_type": LEAN_KINDS.get(d["kind"], d["kind"]),
-                       "generated": "lean", "author": "sync", "decl": d["fqname"],
-                       "lean_status": lean_status[d["fqname"]],
-                       "file": rel, "docstring": d["doc"] or None,
-                       "statement": d["statement"], "context": d["context"] or None,
-                       "private": True if d.get("private") else None},
-                dry_run=dry_run)
-            seen["lean"].add(nid)
+                    f"{name}: Lean declaration appears more than once "
+                    f"({public_file}, {rel})")
+            if not d.get("private") and public_file is None:
+                public_file = rel
+
+    # Reject ambiguous bindings before writing any graph changes. A source name
+    # never silently selects the last file encountered by the scanner.
+    statements, proofs = [], []
+    if blueprint:
+        blueprint_text = read_blueprint(blueprint)
+        statements, proofs = parse_blueprint(blueprint_text)
+        for statement in statements:
+            for name in statement["lean"]:
+                if len(declarations.get(name, ())) > 1:
+                    choices = ", ".join(f"{rel}::{name}" for rel, _ in declarations[name])
+                    raise HGraphError(
+                        f"{statement['label']}: ambiguous Lean binding {name!r}; "
+                        f"use a file-qualified \\lean{{...}} target: {choices}")
+
+    for rel, d, source_key, nid in records:
+        node_changes += _upsert(
+            g, nid, title=d["fqname"], type="lean", content=d["body"],
+            owned={"content_type": LEAN_KINDS.get(d["kind"], d["kind"]),
+                   "generated": "lean", "author": "sync", "decl": d["fqname"],
+                   "source_key": source_key, "lean_status": lean_status[source_key],
+                   "file": rel, "docstring": d["doc"] or None,
+                   "statement": d["statement"], "context": d["context"] or None,
+                   "private": True if d.get("private") else None},
+            dry_run=dry_run)
+        seen["lean"].add(nid)
 
     # 2. Blueprint nodes (keyed by \label) ---------------------------------- #
     gen_edges: list[tuple[str, str, str]] = []
     if blueprint:
-        blueprint_text = read_blueprint(blueprint)
         warnings.extend(_unlabeled_statement_warnings(blueprint_text))
-        statements, proofs = parse_blueprint(blueprint_text)
         warnings.extend(_label_warnings(statements))
         proof_uses = _assoc_proofs(statements, proofs, warnings)
         # every \label on a statement (canonical + any legacy aliases) resolves
@@ -837,9 +879,10 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
                 else:
                     warnings.append(f"{s['label']}: \\uses{{{ref}}} (proof) has no blueprint node")
 
-        referenced_lean = {name for s in statements for name in s["lean"] if name in lean_id}
-        for name in sorted(lean_id):
-            if not lean_private.get(name) and name not in referenced_lean:
+        referenced_lean = {lean_id[name] for s in statements for name in s["lean"] if name in lean_id}
+        for rel, d, source_key, nid in sorted(records, key=lambda r: (r[1]["fqname"], r[0])):
+            if not d.get("private") and nid not in referenced_lean:
+                name = source_key if len(declarations[d["fqname"]]) > 1 else d["fqname"]
                 warnings.append(
                     f"{name}: Lean declaration is not referenced by any blueprint \\lean{{...}}")
 

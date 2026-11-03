@@ -172,13 +172,22 @@ class Graph:
         ``label:<latex-label>`` / ``decl:<lean-fqname>`` / ``key:<manual-key>`` to
         look a node up by its (opaque, hashed) id without knowing the hash. Raises
         if nothing matches, or if the reference is *ambiguous* (several nodes carry
-        the same label/decl/key) — rather than silently picking one."""
+        the same label/decl/key) — rather than silently picking one. A Lean
+        reference may use ``decl:path/File.lean::Namespace.name`` to select its
+        source file explicitly."""
         if self.has_node(ref):
             return ref
         if ":" in ref:
             field, val = ref.split(":", 1)
             if field in ("label", "decl", "key"):
-                hits = [n.id for n in self.nodes() if str(n.meta.get(field)) == val]
+                candidates = [n for n in self.nodes()
+                              if str(n.meta.get(field)) == val or
+                              (field == "decl" and n.meta.get("source_key") == val)]
+                # A previous merged source node may remain stale after its
+                # identities split. Keep its annotations addressable by raw ID,
+                # but prefer current source records for named lookups.
+                active = [n for n in candidates if not n.meta.get("stale")]
+                hits = [n.id for n in (active or candidates)]
                 if len(hits) == 1:
                     return hits[0]
                 if len(hits) > 1:
