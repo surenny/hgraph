@@ -476,6 +476,11 @@ export function GraphModal({
     <div className="graph-modal">
       <div className="gm-bar">
         <h2>Dependency graph</h2>
+        <span title={model.progressMetric === 'local'
+          ? 'Blueprint entries with locally completed Lean bindings; prerequisite closure is not required.'
+          : 'Blueprint entries whose local bindings and all stated prerequisites are complete.'}>
+          {model.progressMetric === 'local' ? 'Local progress' : 'Dependency closure'}
+        </span>
         <select
           className="gm-sel"
           title="Open a chapter — shows its statements; every other chapter stays a box"

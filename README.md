@@ -46,6 +46,28 @@ web interface for exploring and reviewing one project or an entire workspace.
 - **Multi-project workspaces.** Combine several formalization projects under
   one landing page and deployment.
 
+## Graph chapter progress
+
+A project's `hgraph/config.yaml` can select the numerator used for chapter
+percentages in the dependency graph:
+
+```yaml
+site:
+  graph_progress: local  # local | closure; default: closure
+```
+
+`local` counts Blueprint entries with native `lean_ok` or `mathlib_ok`
+status. The denominator includes all Blueprint entries, including unbound
+and admitted entries. It describes source-local formalization, not a
+transitive axiom audit or a successful Lean build. Labels explicitly say
+`local`.
+
+`closure` retains the original behavior: an entry counts only when its local
+binding and all stated prerequisites are complete. Choosing a metric changes
+chapter aggregates only; individual proof states, dependency edges, admitted
+inputs and the detailed closure summary are unchanged. Static precomputed
+layouts and browser layouts use the same metric.
+
 ## Quick start
 
 Requires Python 3.9 or newer.
@@ -316,6 +338,36 @@ site:
 Custom tabs are static content pages today; the tab shape leaves room for
 interactive views later. Content is authored by the site owner and rendered as
 trusted HTML, the same as the overview and footer.
+
+### Lean visibility and source-qualified bindings
+
+Lean 4 `module` files are private by default. The scanner respects explicit
+`public` / `private` declarations and the visibility of enclosing sections;
+legacy files without `module` retain their public default. An `expose`
+attribute does not make a declaration public.
+
+Private helpers in different modules may share a source name. Sync preserves
+each source record rather than overwriting it, and does not report valid
+private reuse as a duplicate public declaration. Public duplicates still
+produce diagnostics. Existing unambiguous names and node IDs remain compatible.
+
+A bare `\lean{Namespace.name}` must resolve to exactly one scanned declaration.
+If that name occurs in several files, sync fails before modifying the graph and
+lists the available file-qualified targets. Select the intended source with a
+path relative to the project root:
+
+```tex
+\lean{Lean/SourceA.lean::Namespace.helper}
+```
+
+The same selector works in CLI references:
+`hgraph get decl:Lean/SourceA.lean::Namespace.helper`. The declaration's displayed
+name remains `Namespace.helper`, with its source file recorded separately.
+
+When a previously merged record splits, its old node is retained as stale,
+including authored annotations and attachments. Review those annotations before
+reattaching them to a specific source. Current source records take precedence
+in named lookups; stale records remain accessible by raw node ID.
 
 Sync warnings are grouped by category and show at most three examples per
 category by default, so a project with hundreds of unresolved Lean references

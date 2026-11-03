@@ -1,4 +1,4 @@
-import type { Chapter, Entry, ProjectData } from './types';
+import type { Chapter, Entry, GraphProgressMetric, ProjectData } from './types';
 import { plainTex } from './latex';
 import { GRAPH } from './palette';
 
@@ -32,6 +32,7 @@ export interface ChapterStat {
 }
 
 export interface GraphModel {
+  progressMetric: GraphProgressMetric;
   nodes: GNode[];
   idx: Map<string, number>;
   edges: [number, number, string][]; // [source, target, type] — source uses target
@@ -192,13 +193,15 @@ export function buildGraphModel(data: ProjectData): GraphModel {
     return { id: e.id, e, i, ch: chOf[i], lvl: e.level != null && LVL[e.level] != null ? LVL[e.level] : 2, stmt, proof };
   });
 
+  const progressMetric = data.graphProgress === 'local' ? 'local' : 'closure';
+  const progressDone = progressMetric === 'local' ? F : closed;
   const chapterStats: ChapterStat[] = chapterOrder.map((k, ch) => {
     const count = nodes.filter((n) => n.ch === ch).length;
-    const done = nodes.filter((n) => n.ch === ch && closed[n.i]).length;
+    const done = nodes.filter((n) => n.ch === ch && progressDone[n.i]).length;
     return { key: ch, label: chLabel(k), count, done };
   });
 
-  return { nodes, idx, edges, chapters: chapterStats };
+  return { nodes, idx, edges, chapters: chapterStats, progressMetric };
 }
 
 function nodeStyle(n: GNode): { b: string; f: string } {
@@ -321,7 +324,8 @@ export function dotMixed(model: GraphModel, expanded: ReadonlySet<number>, lvlMa
   model.chapters.forEach((stat, ch) => {
     if (!stat.count) return;
     const pct = Math.round((100 * stat.done) / stat.count);
-    s += `  "ch${ch}" [label="${gvEsc(stat.label)}\\n${stat.count} statements · ${pct}%",fillcolor="${GRAPH.clusterFill}",color="${GRAPH.clusterBorder}",penwidth=2.6,fontcolor="${GRAPH.clusterText}",tooltip="${gvEsc(stat.label)} — click to expand"];\n`;
+    const suffix = model.progressMetric === 'local' ? ' local' : '';
+    s += `  "ch${ch}" [label="${gvEsc(stat.label)}\\n${stat.count} statements · ${pct}%${suffix}",fillcolor="${GRAPH.clusterFill}",color="${GRAPH.clusterBorder}",penwidth=2.6,fontcolor="${GRAPH.clusterText}",tooltip="${gvEsc(stat.label)} — click to expand"];\n`;
   });
   const seenEdge = new Set<string>();
   const chapterDrawn: Array<[string, string, string]> = [];
